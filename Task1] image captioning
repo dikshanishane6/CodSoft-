@@ -1,0 +1,69 @@
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras.applications import ResNet50
+from tensorflow.keras.preprocessing.image import load_img, img_to_array
+from tensorflow.keras.preprocessing.text import Tokenizer
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+from tensorflow.keras.layers import Embedding, LSTM, Dense, Input
+from tensorflow.keras.models import Model
+import os
+from nltk.translate.bleu_score import corpus_bleu
+
+def extract_features(image_path):
+    model = ResNet50(weights='imagenet', include_top=False, pooling='avg')
+    image = load_img(image_path, target_size=(224, 224))
+    image = img_to_array(image)
+    image = np.expand_dims(image, axis=0)
+    image = tf.keras.applications.resnet50.preprocess_input(image)
+    feature_vector = model.predict(image)
+    return feature_vector
+
+
+image_paths = ['path/to/image1.jpg', 'path/to/image2.jpg']
+captions = ['A dog playing in the park.', 'A cat sitting on a windowsill.']
+
+
+tokenizer = Tokenizer()
+tokenizer.fit_on_texts(captions)
+sequences = tokenizer.texts_to_sequences(captions)
+max_length = max(len(caption.split()) for caption in captions)
+padded_sequences = pad_sequences(sequences, maxlen=max_length, padding='post')
+
+def create_captioning_model(vocab_size, max_length):
+    image_input = Input(shape=(2048,))
+    image_features = Dense(256, activation='relu')(image_input)
+
+    caption_input = Input(shape=(max_length,))
+    caption_embedding = Embedding(vocab_size, 256)(caption_input)
+    caption_lstm = LSTM(256)(caption_embedding)
+
+    decoder = tf.keras.layers.add([image_features, caption_lstm])
+    decoder_output = Dense(vocab_size, activation='softmax')(decoder)
+
+    model = Model(inputs=[image_input, caption_input], outputs=decoder_output)
+    model.compile(loss='categorical_crossentropy', optimizer='adam')
+    return model
+
+features = np.array([extract_features(img) for img in image_paths])
+vocab_size = len(tokenizer.word_index) + 1
+one_hot_encoded_labels = tf.keras.utils.to_categorical(padded_sequences, num_classes=vocab_size)
+
+model = create_captioning_model(vocab_size, max_length)
+model.fit([features, padded_sequences], one_hot_encoded_labels, epochs=20, batch_size=2)
+
+def generate_caption(model, image_feature, tokenizer, max_length):
+    caption = []
+    for _ in range(max_length):
+        sequence = pad_sequences([caption], maxlen=max_length, padding='post')
+        yhat = model.predict([image_feature, sequence], verbose=0)
+        yhat = np.argmax(yhat)
+        caption.append(yhat)
+        if yhat == tokenizer.word_index.get('<end>', 0):  # Assuming <end> is a token for end of caption
+            break
+    return ' '.join([tokenizer.index_word[i] for i in caption if i > 0])
+
+
+new_image_path = 'path/to/new_image.jpg'
+new_image_feature = extract_features(new_image_path)
+generated_caption = generate_caption(model, new_image_feature, tokenizer, max_length)
+print("Generated Caption:", generated_caption)
