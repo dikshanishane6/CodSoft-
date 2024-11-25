@@ -1,0 +1,71 @@
+import pandas as pd
+from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.feature_extraction.text import TfidfVectorizer
+
+ratings_data = {
+    'User ': ['Alice', 'Bob', 'Charlie', 'David', 'Eva'],
+    'Movie1': [5, 4, 0, 0, 1],
+    'Movie2': [4, 0, 0, 2, 3],
+    'Movie3': [0, 0, 5, 3, 0],
+    'Movie4': [0, 3, 4, 0, 0],
+    'Movie5': [1, 0, 0, 4, 0]
+}
+
+ratings_df = pd.DataFrame(ratings_data)
+ratings_df.set_index('User ', inplace=True)
+
+similarity_matrix = cosine_similarity(ratings_df.fillna(0))
+similarity_df = pd.DataFrame(similarity_matrix, index=ratings_df.index, columns=ratings_df.index)
+
+movies_data = {
+    'Title': ['Movie1', 'Movie2', 'Movie3', 'Movie4', 'Movie5'],
+    'Genre': ['Action|Adventure', 'Action|Sci-Fi', 'Adventure|Fantasy', 'Fantasy|Drama', 'Drama|Romance'],
+    'Director': ['Director1', 'Director2', 'Director1', 'Director3', 'Director2']
+}
+
+movies_df = pd.DataFrame(movies_data)
+
+
+movies_df['Features'] = movies_df['Genre'] + ' ' + movies_df['Director']
+tfidf = TfidfVectorizer()
+tfidf_matrix = tfidf.fit_transform(movies_df['Features'])
+
+cosine_sim = cosine_similarity(tfidf_matrix, tfidf_matrix)
+
+def get_collaborative_recommendations(user, n_recommendations=2):
+    if user not in similarity_df.index:
+        raise ValueError(f"User  '{user}' not found in the ratings data.")
+    
+    similar_users = similarity_df[user].sort_values(ascending=False)[1:]  # Exclude the user themselves
+    recommendations = pd.Series(dtype=float)
+
+    for similar_user, score in similar_users.items():
+        similar_user_ratings = ratings_df.loc[similar_user]
+        recommendations = recommendations.append(similar_user_ratings[similar_user_ratings > 0] * score)
+
+    recommendations = recommendations.groupby(recommendations.index).sum()
+    recommendations = recommendations.sort_values(ascending=False)
+
+    return recommendations.head(n_recommendations)
+
+def recommend_movies(title, n_recommendations=2):
+    if title not in movies_df['Title'].values:
+        raise ValueError(f"Movie '{title}' not found in the movie dataset.")
+    
+    idx = movies_df.index[movies_df['Title'] == title][0]
+    sim_scores = list(enumerate(cosine_sim[idx]))
+    sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
+    sim_scores = sim_scores[1:n_recommendations + 1]  # Exclude the movie itself
+    movie_indices = [i[0] for i in sim_scores]
+    
+    return movies_df['Title'].iloc[movie_indices]
+
+try:
+    print("Collaborative Filtering Recommendations for Alice:")
+    print(get_collaborative_recommendations('Alice'))
+
+    print("\nContent-Based Filtering Recommendations for Movie1:")
+    print(recommend_movies('Movie1'))
+    
+except ValueError as e:
+    print(e)
